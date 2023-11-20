@@ -5,7 +5,7 @@
 #install.packages("scales")
 #install.packages("gtsummary")
 #install.packages("rgeoda")
-install.packages("ggpubr")
+#install.packages("ggpubr")
 library(tidyverse)
 library(haven)
 library(lme4)
