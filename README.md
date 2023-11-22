@@ -1,2 +1,2 @@
 # mrp-fertility
-estiamte county-level fertility preferences 
+##estimate county-level fertility preferences 
