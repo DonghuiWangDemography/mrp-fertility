@@ -30,13 +30,8 @@ library(ggpubr)
 
 
 setwd("C:/Users/Donghui/SynologyDrive/MRP/data_mrp") #home desktop 
-
-rm(list = ls())
-
 load("X2017fertility_survey.RData")
 
-
-#length(unique(X2017fertility_survey$c6)) #2737
 
 
 # *work on 新疆建设兵团
@@ -57,7 +52,6 @@ load("X2017fertility_survey.RData")
 # 第十四师在和田市 653201
 # */
 
-#names(X2017fertility_survey)
 
 fertility<-X2017fertility_survey%>%
   #work on xingjiang
@@ -79,7 +73,7 @@ fertility<-X2017fertility_survey%>%
                   prov=as.integer(prefecture/100),
                   bdate =  as.Date(paste0(q101m, "/01/", q101y), "%m/%d/%Y"),
                   cdate = as.Date("2017-07-01"),
-                  age =as.integer((cdate-bdate)/365),
+                  age= as.integer((cdate - bdate) / 365.25),
                   agegp = factor(case_when(age <=24 ~ "15-24",
                                            age >24 & age <= 34 ~ "25-34", 
                                            age >34 ~ "35-49")), 
@@ -90,57 +84,52 @@ fertility<-X2017fertility_survey%>%
                   intend2= ifelse(q402>=2, 1,0),
                   ideal= q401,
                   intend=q402,
-                  edugp=factor(edugp, levels = c("primary and below", "secondary", "hs and above")))%>%
-  #select, generate interactions 
-  filter(age>=15 & age <=49, complete.cases(ideal, intend), ideal<10, intend<10, q102 !=5)%>%
+                  edugp=factor(edugp, levels = c("primary and below", "secondary", "hs and above")))%>% 
+  #filter age only : 180211
+  filter(age>=15 & age <=49, complete.cases(ideal, intend), ideal<10, intend<10)%>%
   rename(prov_name = c1, county=countycode)%>%
-  dplyr::select(prov_name, prov, prefecture, county, agegp, edugp, ideal2,intend2, ideal,intend,q102,w_2017)%>%
+  dplyr::select(prov_name, prov, prefecture, county, agegp, edugp, ideal2,intend2, ideal,intend,w_2017)%>%
   mutate(age_edu = case_when 
          (agegp == "15-24" & edugp == "primary and below" ~ 1 ,
-           agegp == "15-24" & edugp == "middle" ~ 2,
+           agegp == "15-24" & edugp == "secondary" ~ 2,
            agegp == "15-24" & edugp == "hs and above" ~3,
            agegp == "25-34" & edugp == "primary and below" ~ 4 ,
            agegp == "25-34" & edugp ==  "secondary" ~5  ,
            agegp == "25-34" & edugp == "hs and above"  ~ 6,
            agegp == "35-49" & edugp == "primary and below"  ~ 7 ,
-           agegp == "35-49" & edugp == "middle" ~ 8,
+           agegp == "35-49" & edugp == "secondary" ~ 8,
            agegp == "35-49" & edugp == "hs and above" ~9 ,
-           ))%>%
-  na.omit()%>%
-  arrange(prefecture, agegp, edugp)
+           ),
+         inten_ideal=intend/ideal)%>%
+  na.omit()  %>%
+  arrange(prefecture, agegp, edugp)  #174394
 
-table(fertility$edugp)
 length(unique(fertility$prefecture)) #361
 length(unique(fertility$county)) #2703
 length(unique(fertility$prov)) 
 
-summary(fertility$ideal)
-summary(fertility$intend)
-
-
+summary(fertility$inten_ideal)
 
 # merge with synthetic cells
 load("margin_county.RData")
 length(unique(margin$county)) #2821
 
-
-
-#-----identify inconsisent geographic identifiers,no need to run this chunk-----------
-fer_ind<-margin%>%
-  dplyr::select(county, livebirth)%>%
-  unique()%>%
-  right_join(fertility, by ="county")
-
-length(unique(fer_ind$county))  #2386
-
-
-fer_ind_NA<-fer_ind%>%
-  filter(is.na(livebirth))%>%
-  dplyr::select(county,prov_name,prefecture)%>%
-  unique()
-#317 unmatched due to administrative unit change, export to excel and manually match with 2010 census 
-#GB_T 2260-2007 XG1_2027
-write_excel_csv(fer_ind_NA, file="fer_ind_NA.csv")
+#-----identify inconsistent geographic identifiers,no need to rerun this chunk ever time-----------
+# fer_ind<-margin%>%
+#   dplyr::select(county, livebirth)%>%
+#   unique()%>%
+#   right_join(fertility, by ="county")
+# 
+# length(unique(fer_ind$county))  #2386
+# 
+# 
+# fer_ind_NA<-fer_ind%>%
+#   filter(is.na(livebirth))%>%
+#   dplyr::select(county,prov_name,prefecture)%>%
+#   unique()
+# #317 unmatched due to administrative unit change, export to excel and manually match with 2010 census 
+# #GB_T 2260-2007 XG1_2027
+# write_excel_csv(fer_ind_NA, file="fer_ind_NA.csv")
 
 #------------------------------------------------------------------
 #import imputed  gbcode 
@@ -154,24 +143,34 @@ livebirth2010<-margin%>%
 #replace imputed gbcode with the previous ones and then merge with margin 
 fer_ind<-fertility%>%
   left_join(fer_ind_NA_imputed, by="county")%>%
-  mutate(county=if_else(!is.na(county2010), county2010, county))%>%
+  dplyr::select(-prefecture)%>%
+  mutate(county=if_else(!is.na(county2010), county2010, county),
+  #update prefecture according to the imputed county id 
+         prefecture=as.integer(county/100))%>%
   dplyr::select(-county2010)%>%
-  inner_join(livebirth2010, by="county")
+  inner_join(livebirth2010, by="county") #162426
 
 length(unique(fer_ind$county))  #2473
 
 
 
-#2473
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 5.00   39.00   62.00   85.86   98.00  721.00 
+
+
+#merge census with fertility survey to ensure consistencies between the two (removew those unmatched counties)
 census_ind<-fer_ind%>%
-  dplyr::select(county)%>%
+  dplyr::select(county,prefecture)%>%
   unique()%>%
-  inner_join(margin, by = "county")%>%
+  inner_join(margin, by = c("county", "prefecture"))%>%
   na.omit()%>%
   mutate(edugp=factor(edugp, levels = c("primary and below", "secondary", "hs and above")))
 
-length(unique(census_ind$county)) #2473
+length(unique(census_ind$county)) 
 
+
+save(fer_ind, file="fer_ind.RData")
+save(census_ind, file="census_ind.RData")
 
 
 #------descriptive statistics-------
@@ -181,16 +180,12 @@ desc<-fer_ind%>%
 
 table1(~ideal+intend, data = desc,decimal=2,weights="w_2017" )
 
-
 table1(~ideal+intend |agegp, data= desc,weights="w_2017" , decimal=2)
 table1(~ideal+intend |edugp, data= desc,weights="w_2017" , decimal=2 )
 
 table1(~as.factor(ideal3)+as.factor(intend3), data=desc,weights="w_2017" , decimal=3)
-
 table1(~as.factor(ideal3)+as.factor(intend3) |agegp, data= desc, weights="w_2017")
-
 table1(~as.factor(ideal3)+as.factor(intend3) |edugp, data= desc)
-
 
 
 
@@ -201,27 +196,25 @@ table1(~as.factor(ideal3)+as.factor(intend3) |edugp, data= desc)
 fit1<-lmer(ideal ~ 1+(1|county) , data = fer_ind)
 
 fit2<-lmer(ideal ~ 1 + (1|agegp) + (1|edugp) +(1|county),
-           data = fer_ind )
+           data = fer_ind, 
+           control = lmerControl(optimizer = "bobyqa") )
 
 #no interaction, no contextual variable 
 fit3<-lmer(ideal ~ 1 + (1|agegp) + (1|edugp) +(1|county)+(1|prefecture)+ (1|prov),
-           data = fer_ind )
+           data = fer_ind, 
+           control = lmerControl(optimizer = "bobyqa") )
 
-#with interaction &  live birth
+#fixed effect: live birth
 fit4<-lmer(ideal ~ 1 +livebirth +(1|agegp) + (1|edugp) +(1|county)+(1|prefecture)+ (1|prov),
            data = fer_ind)
 
-#two contetual variables 
+#livebirth +interaction term 
 fit5<-lmer(ideal ~ 1 +livebirth +(1|agegp) + (1|edugp) + (1|age_edu)+(1|county)+(1|prefecture)+ (1|prov),
            data = fer_ind)
 
 
 AIC(fit1, fit2, fit3, fit4, fit5)
 BIC(fit1, fit2, fit3, fit4, fit5)
-#logLik(fit1, fit2, fit3, fit4, fit5)
-deviance(fit1, fit2, fit3, fit4, fit5)
-df.residual(fit1, fit2, fit3, fit4, fit5)
-
 
 summary(fit1)
 summary(fit2)
@@ -239,24 +232,40 @@ fit2<-lmer(intend ~ 1 + (1|agegp) + (1|edugp) +(1|county),
 
 #no interaction, no contextual variable 
 fit3<-lmer(intend ~ 1 + (1|agegp) + (1|edugp) +(1|county)+(1|prefecture)+ (1|prov),
-           data = fer_ind )
+           data = fer_ind,
+           control = lmerControl(optimizer = "bobyqa") )
 
 #with interaction &  live birth
 fit4<-lmer(intend ~ 1 +livebirth +(1|agegp) + (1|edugp) +(1|county)+(1|prefecture)+ (1|prov),
            data = fer_ind,
            control = lmerControl(optimizer = "bobyqa"))
 
-#two contetual variables 
-
+#two contractual variables 
 
 fit5 <- lmer(intend ~ 1 + livebirth + (1 | agegp) + (1 | edugp) + (1 | age_edu) + (1 | county) + 
                (1 | prefecture) + (1 | prov),
              data = fer_ind, 
              control = lmerControl(optimizer = "bobyqa"))
+#boundary (singular) fit : no need to fit a complicated interaction model 
 
-#################
+
+
+
+AIC(fit1, fit2, fit3, fit4, fit5)
+BIC(fit1, fit2, fit3, fit4, fit5)
+
+summary(fit1)
+summary(fit2)
+summary(fit3)
+summary(fit4)
+summary(fit5)
+
+
+
+
+############################################################
 #final model : fit4
-#################
+
 ideal<-lmer(ideal ~ 1 +livebirth +(1|agegp) + (1|edugp) +(1|county)+(1|prefecture)+ (1|prov),
            data = fer_ind,
            control = lmerControl(optimizer = "bobyqa"))
@@ -265,8 +274,8 @@ intend<-lmer(intend ~ 1 +livebirth +(1|agegp) + (1|edugp) +(1|county)+(1|prefect
             data = fer_ind,
             control = lmerControl(optimizer = "bobyqa"))
 
-summ(ideal,  digits=4)
-summ(intend,digits=4)
+summary(ideal,  digits=4)
+summary(intend,digits=4)
 
 
 bin_model<-tab_model( ideal,intend)
@@ -277,6 +286,7 @@ print(bin_model)
 # census_ind$est_intend<-predict(intend, newdata=census_ind,allow.new.levels = TRUE)
 
 #prediction with interval 
+set.seed(12345)
 census_ind$ideal_ci<-predictInterval(ideal, newdata = census_ind, n.sims = 999, level= 0.95 )
 census_ind$intend_ci<-predictInterval(intend, newdata = census_ind, n.sims = 999,level= 0.95)
 
@@ -347,6 +357,14 @@ summary(mrp_county$ideal)
 summary(mrp_county$intend)
 
 
+# > summary(mrp_county$ideal)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 1.334   1.876   1.985   2.015   2.100   3.765 
+# > summary(mrp_county$intend)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 1.113   1.608   1.880   1.888   2.102   3.936 
+
+
 mrp_sub<-census_ind%>%
   group_by(county,agegp,edugp)%>%
   summarise(ideal=weighted.mean(ideal_ci$fit, weight),
@@ -357,6 +375,12 @@ mrp_sub<-census_ind%>%
 summary(mrp_sub$ideal)
 summary(mrp_sub$intend)
 
+# > summary(mrp_sub$ideal)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 1.203   1.834   1.958   1.987   2.095   3.824 
+# > summary(mrp_sub$intend)
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 0.8824  1.5846  1.8282  1.8522  2.0852  4.0753 
 
 
 summaries_ideal <- mrp_sub %>%
@@ -387,23 +411,134 @@ view(summaries_intend)
 mrp_sub_gather<-mrp_sub%>%
   gather(ideal, intend, key = "attitude" , value ="value")
 
+table1(~ideal+intend |agegp, data= mrp_sub, decimal=2)
 
-box_colors <- c("#fbe45b","#a6d0c8")
 
-mrp_box<-ggplot(data = mrp_sub_gather, aes(x = attitude , y = value, fill=attitude))+
-  geom_boxplot(outlier.shape = NA  )+
-  stat_boxplot(geom = "errorbar", width = 0.5 )+
-  scale_fill_manual(values = box_colors)+
-  facet_wrap( ~edugp+agegp)+
+#by age and education subgroups 
+
+ideal_agegp<-ggplot(data=mrp_sub)+
+  stat_density(aes(ideal, color=agegp), geom="line", position="identity")+
+  scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
   theme_bw()+
-  labs(x ="", fill="")+
   theme(strip.background = element_rect(fill = "white"),
-        text = element_text(size = 15))+
-  scale_y_continuous(limits = c(0.5, 3))
-print(mrp_box)  
+        legend.position = c(.8, .7),
+        axis.title.x = element_text(size = 12))+
+  scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0))+
+  labs(color="Age")+
+  xlab("Ideal")
 
-ggsave(filename = "mrp_box.png" , plot =mrp_box ) 
 
+ideal_edugp<-ggplot(data=mrp_sub)+
+  stat_density(aes(ideal, color=edugp), geom="line", position="identity")+
+    scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
+  theme_bw()+
+  theme(strip.background = element_rect(fill = "white"),
+        legend.position = c(.8, .7),
+        axis.title.x = element_text(size = 12))+
+  scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0))+
+  labs(color="Education") +
+  xlab("Ideal")
+
+
+
+intend_agegp<-ggplot(data=mrp_sub)+
+  stat_density(aes(intend, color=agegp), geom="line", position="identity")+
+  scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
+  theme_bw()+
+  theme(strip.background = element_rect(fill = "white"),
+        legend.position = c(.8, .7),
+        axis.title.x = element_text(size = 12))+
+  scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0))+
+  labs(color="Age")+
+  xlab("Intend")
+
+
+intend_edugp<-ggplot(data=mrp_sub)+
+  stat_density(aes(intend, color=edugp), geom="line", position="identity")+
+  scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
+  theme_bw()+
+  theme(strip.background = element_rect(fill = "white"),
+        legend.position = c(.8, .7),
+        axis.title.x = element_text(size = 12))+
+  scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0)) +
+  labs(color="Education")+
+  xlab("Intend")
+
+sub_combined <-cowplot:: plot_grid( ideal_edugp, ideal_agegp,  intend_edugp,intend_agegp,
+                                    nrow=2)
+ print(sub_combined)
+
+ggsave(filename = "sub_combined.png" , plot =sub_combined ) 
+ 
+
+
+
+# mrp_density<-ggplot(data = mrp_sub_gather )+
+#   geom_density(aes(value, color=attitude, linetype = attitude), size=0.8)+
+#   scale_linetype_manual(values=c("solid", "dashed"))+
+#   scale_color_manual(values= c("#a65852","black"))+
+#   facet_grid( agegp ~edugp)+
+#   theme_bw()+
+#   labs(x ="", fill="")+
+#   theme(strip.background = element_rect(fill = "white"),
+#         text = element_text(size = 13),
+#         legend.title = element_blank())+
+#   scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0)) 
+# 
+# print(mrp_density)  
+# 
+# ggsave(filename = "mrp_density.png" , plot =mrp_density ) 
+
+# #another version 
+# ideal_byage<-ggplot(data=mrp_sub)+
+#   geom_density(aes(ideal, color=edugp))+
+#   scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
+# #  scale_color_manual(values= c( "#000000","#848884" , "#D3D3D3"))+
+#   facet_wrap(~agegp)+
+#   theme_bw()+
+#   theme(strip.background = element_rect(fill = "white"))+
+#   scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0)) 
+# 
+# 
+# intend_byage<-ggplot(data=mrp_sub)+
+#   geom_density(aes(intend, color=edugp))+
+#   scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
+#   facet_wrap(~agegp)+
+#   theme_bw()+
+#   theme(strip.background = element_rect(fill = "white"))+
+#   scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0)) 
+# 
+# 
+# byage<-cowplot:: plot_grid(ideal_byage,  intend_byage, nrow=2)
+# print(byage)
+# 
+# ggsave(filename = "byage.png" , plot =byage ) 
+# 
+# 
+# #----------------------
+# 
+# ideal_byedu<-ggplot(data=mrp_sub)+
+#   geom_density(aes(ideal, color=agegp))+
+#   scale_color_manual(values= c("#610400","#ff8680" , "#fee3e2"))+
+#   #  scale_color_manual(values= c( "#000000","#848884" , "#D3D3D3"))+
+#   facet_wrap(~edugp)+
+#   theme_bw()+
+#   theme(strip.background = element_rect(fill = "white"))
+# 
+# 
+# intend_byedu<-ggplot(data=mrp_sub)+
+#   geom_density(aes(intend, color=agegp))+
+#   scale_color_manual(values= c("#610400","#ff8680" , "#fee3e2"))+
+#   #  scale_color_manual(values= c("#000000","#848884" , "#D3D3D3"))+
+#   facet_wrap(~edugp)+
+#   theme_bw()+
+#   theme(strip.background = element_rect(fill = "white"))
+# 
+# 
+# byedu<-cowplot:: plot_grid(ideal_byedu,  intend_byedu, nrow=2)
+# print(byedu)
+# 
+# ggsave(filename = "byedu.png" , plot =byedu ) 
 
 
 # mrp_county_whole<-margin%>%
@@ -421,49 +556,73 @@ ggsave(filename = "mrp_box.png" , plot =mrp_box )
 #             intend=weighted.mean(est_intend, weight), 
 #             npop=sum(weight)) 
 
-save(mrp, file="mrp.RData")
+#save(mrp, file="mrp.RData")
 write.csv(mrp_county, file="mrp_county.csv")
+write.csv(mrp_sub, file="mrp_sub.csv")
 
 #maping 
-# county_map<-st_read("C:/Users/Donghui/SynologyDrive/MRP/data_mrp/shapfile/区县.shp")%>%
-#   dplyr::select(省, 市, 县, 县代码,  geometry)%>%
-#   rename(county = 县代码)
 
 
 county_map<-st_read("C:/Users/Donghui/SynologyDrive/MRP/data_mrp/wholechina/export.shp")%>%
   dplyr::select(ename, gbcode,l700016_10,geometry)%>% #2872
   rename(county =gbcode, livebirth2010=l700016_10 )
 
-length(unique(county_map$county))
-
 province_map<-st_read("C:/Users/Donghui/SynologyDrive/MRP/data_mrp/shapfile/中国行政区.shp")
 
 length(unique(county_map$county)) #2872
 length(unique(mrp_county$county)) #2473
 
-merged<-merge(county_map , mrp_county, by.x="county" , by.y = "county" , all= FALSE ) #2807
+merged<-merge(county_map , mrp_county, by.x="county" , by.y = "county" , all= FALSE ) 
+
+
+summary(merged$ideal)
+summary(merged$intend)
 
 map_wholecounty<-merged%>%
   gather(ideal, intend, key = "measure" , value="value")%>%
-  mutate(value_dis=cut(value, breaks = c(1.3, 1.5, 2, 2.5 , Inf),
-                       labels = c("[1.3, 1.5)", "[1.5, 2)", "[2, 2.5)", "[2.5, 3.8] "), 
-                       include.lowest = FALSE))
+  mutate(value_dis=cut(value, breaks = c(1.0, 1.5, 2, 2.5 , Inf),
+                       labels = c("[1.0, 1.5)", "[1.5, 2)", "[2, 2.5)", "[2.5, 4.0] "), 
+                       include.lowest = FALSE),
+         valid=1)  #indicator for places with observation 
 
-length(unique(map_wholecounty$county))  #2472
 
+#construct a map of China 
+prov<-province_map%>%
+  filter(ID !="Xianggang" &  ID !="Aomen")%>%
+  mutate(provname=if_else(ID=="Taiwan" , " ", ID) ,
+         provname=if_else(ID=="Xizang", "Tibet", provname),
+         provname=if_else(ID=="NeiMongol", "Inner Mongolia", provname))
+
+mchina<-ggplot(data=prov)+
+  geom_sf(fill=NA)+
+  geom_text(aes(label = provname, x=X, y=Y))+
+  theme_map()+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        strip.background = element_blank())+
+  geom_sf(data=map_wholecounty, aes(fill=valid), alpha=0.2, color="transparent", fill="lightgrey")
+  print(mchina)
+
+  ggsave(filename = "mchina.png" , plot =mchina ) 
+  
+
+#graph result 
+
+table(map_wholecounty$value_dis)
 
 table(map_wholecounty$value_dis[map_wholecounty$measure == "ideal"])
 
-# [1, 1.5)  [1.5, 2)  [2, 2.5) [2.5, 4]  
-# 8      1307      1048       109 
-# > ( 1048+ 109 )/2472
-# [1] 0.4680421
+# [1.3, 1.5)    [1.5, 2)    [2, 2.5) [2.5, 3.8]  
+# 10        1343        1002         117
+
 
 table(map_wholecounty$value_dis[map_wholecounty$measure == "intend"])
 
-# [1, 1.5)  [1.5, 2)  [2, 2.5) [2.5, 4]  
-# 329      1271       730       142 
-(730+142)/2472
+# [1.3, 1.5)    [1.5, 2)    [2, 2.5) [2.5, 3.8]  
+# 399        1186         751         136 
+
+
+#top 10 countie with largest / smallest estimates 
 countyname <- read_excel("2020中国人口普查分县资料.xlsx",  sheet = "livebirth2020")
 
 ideal_top10_lowest<-mrp_county%>%
@@ -506,9 +665,45 @@ mrp_graph<-ggplot(data = map_wholecounty) +
         legend.position = "bottom", legend.box = "horizontal",legend.justification = "center")+
   labs(fill="")
 
-print(mrp_graph)
 
+print(mrp_graph)
 ggsave(filename = "mrp_graph.png" , plot =mrp_graph ) 
+
+
+#--------------------------------
+#ideal to intend ratio 
+
+ratio<-merged%>%
+  mutate(ratio=intend/ideal,
+         ratio_dis=cut(ratio, breaks = c(0.6, 0.8, 1, Inf),
+                                 labels = c("[60%, 80%)", "[80%, 100%)", "[100%, 133%)"), 
+                                 include.lowest = FALSE))
+summary(ratio$ratio)
+table(ratio$ratio_dis)
+
+
+#ratio_colors <- c("#DFDFEA" , "#8D9FD1" , "#D18CB8" )
+ratio_colors <- c("#DFDFEA" , "#8D9FD1" , "#9F1F31" )
+
+ratio_graph<-ggplot(data = ratio) +
+  geom_sf(aes(fill=ratio_dis) , color="transparent")+
+  geom_sf(data=province_map,color = "#514e4c", fill = NA)+
+  scale_fill_manual(values = ratio_colors, drop= TRUE)+
+    theme_map()+
+    theme(plot.title = element_text(size = 12, face="plain" ,hjust = 0.5), 
+          axis.title = element_blank(),
+          axis.text = element_blank(),
+          strip.background = element_blank(),
+          legend.position = "bottom", legend.box = "horizontal",legend.justification = "center")+
+    labs(title = "(Intended/Ideal)\u00D7100%",fill="")
+  
+print(ratio_graph) 
+
+raio_combined <-cowplot:: plot_grid( mrp_graph, ratio_graph, 
+                                    nrow=2)
+print(raio_combined)
+
+ggsave(filename = "raio_combined.png" , plot =raio_combined ) 
 
 
 # #continuous version
@@ -542,8 +737,8 @@ map_gp<-county_map%>%
   mutate(ideal_dis=cut(ideal, breaks = c(1, 1.5, 2, 2.5 , Inf),
                      labels = c("[1, 1.5)", "[1.5,2)", "[2, 2.5)", "[2.5, 4]"), 
                      include.lowest = FALSE),
-         intend_dis=cut(intend, breaks = c(0.9, 1, 1.5, 2, 2.5 , Inf),
-                       labels = c("[0.9,1)", "[1, 1.5)", "[1.5,2)", "[2, 2.5)", "[2.5, 4]"), 
+         intend_dis=cut(intend, breaks = c(0.8, 1, 1.5, 2, 2.5 , Inf),
+                       labels = c("[0.8 ,1)", "[1, 1.5)", "[1.5,2)", "[2, 2.5)", "[2.5, 4]"), 
                        include.lowest = FALSE))
 
 mrpgp_ideal <- c(  "#2c7c94", "#a6d0c8", "#fbe45b", "#a65852" )
@@ -654,8 +849,6 @@ intend_lisa<-ggplot(data=merged)+
 
 print(intend_lisa)
 
-
-
 lisa<-ggarrange(ideal_lisa, intend_lisa, common.legend = TRUE,legend="bottom")
 print(lisa)
 
@@ -723,7 +916,7 @@ perform_analysis <- function(sample) {
               data = sample)
   
   # Predict ideal probabilities
-  census_ind$est_ideal <- predict(ideal, newdata = census_ind, allow.new.levels = TRUE)
+  census_ind$est_ideal <- predict(ideal, newdata = census_ind, allow.new.levels = TRUE)  #no confidence inverval to same computing time
   
   # Compute ideal_mrp
   ideal_mrp <- census_ind %>%
@@ -805,7 +998,6 @@ mape_ideal <- do.call(rbind, combined_id)%>%
   mutate(method = ifelse(method == "mape_mrp_combined", "mrp", "disaggregation"))
 
 mape_ideal
-
 
 
 
