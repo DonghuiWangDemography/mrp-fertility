@@ -1,11 +1,18 @@
 #county level estimate using synthetic model 
 #clean up mrp-full-06
+# line 1-170: data cleaning procedure . Can jump & directly load cleaned data.
+# update: 2023-12-12 : alternative binary analysis of two or more ideal or intention 
+# update: 2024-04-16 : theil index decompose between and within provincial differences 
+
 
 #install.packages("parallel")
 #install.packages("scales")
 #install.packages("gtsummary")
 #install.packages("rgeoda")
 #install.packages("ggpubr")
+#install.packages("iIneq")
+#install.packages("REAT")
+library(iIneq)
 library(tidyverse)
 library(haven)
 library(lme4)
@@ -27,12 +34,16 @@ library(scales)
 library(sjPlot)
 library(rgeoda)
 library(ggpubr)
+library(REAT)
+
 
 
 setwd("C:/Users/Donghui/SynologyDrive/MRP/data_mrp") #home desktop 
+
+#=======================================
+#step 1: data cleaning, merging
+#======================================
 load("X2017fertility_survey.RData")
-
-
 
 # *work on 新疆建设兵团
 # /*各师机关所在地:
@@ -99,8 +110,7 @@ fertility<-X2017fertility_survey%>%
            agegp == "35-49" & edugp == "primary and below"  ~ 7 ,
            agegp == "35-49" & edugp == "secondary" ~ 8,
            agegp == "35-49" & edugp == "hs and above" ~9 ,
-           ),
-         inten_ideal=intend/ideal)%>%
+           ))%>%
   na.omit()  %>%
   arrange(prefecture, agegp, edugp)  #174394
 
@@ -108,7 +118,6 @@ length(unique(fertility$prefecture)) #361
 length(unique(fertility$county)) #2703
 length(unique(fertility$prov)) 
 
-summary(fertility$inten_ideal)
 
 # merge with synthetic cells
 load("margin_county.RData")
@@ -152,12 +161,6 @@ fer_ind<-fertility%>%
 
 length(unique(fer_ind$county))  #2473
 
-
-
-# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-# 5.00   39.00   62.00   85.86   98.00  721.00 
-
-
 #merge census with fertility survey to ensure consistencies between the two (removew those unmatched counties)
 census_ind<-fer_ind%>%
   dplyr::select(county,prefecture)%>%
@@ -169,11 +172,15 @@ census_ind<-fer_ind%>%
 length(unique(census_ind$county)) 
 
 
-save(fer_ind, file="fer_ind.RData")
-save(census_ind, file="census_ind.RData")
+save(fer_ind, file="fer_ind.RData") 
+save(census_ind, file="census_ind.RData")  #census (w weights), after merge with fertility survey 
 
+#==========end of data cleaning procedure===============
 
-#------descriptive statistics-------
+#------descriptive statistics----------
+load("fer_ind.RData")
+load("census_ind.RData")
+
 desc<-fer_ind%>%
   mutate(ideal3=if_else(ideal>3,3 ,ideal),
          intend3=if_else(intend>3,3 ,intend))
@@ -185,13 +192,13 @@ table1(~ideal+intend |edugp, data= desc,weights="w_2017" , decimal=2 )
 
 table1(~as.factor(ideal3)+as.factor(intend3), data=desc,weights="w_2017" , decimal=3)
 table1(~as.factor(ideal3)+as.factor(intend3) |agegp, data= desc, weights="w_2017")
-table1(~as.factor(ideal3)+as.factor(intend3) |edugp, data= desc)
+table1(~as.factor(ideal3)+as.factor(intend3) |edugp, data= desc, weights="w_2017")
 
 
 
-###################################
-#model fit 
-##################################
+#==================================
+# Step 2: model fit, post-stratification  
+#===================================
 
 fit1<-lmer(ideal ~ 1+(1|county) , data = fer_ind)
 
@@ -249,8 +256,6 @@ fit5 <- lmer(intend ~ 1 + livebirth + (1 | agegp) + (1 | edugp) + (1 | age_edu) 
 #boundary (singular) fit : no need to fit a complicated interaction model 
 
 
-
-
 AIC(fit1, fit2, fit3, fit4, fit5)
 BIC(fit1, fit2, fit3, fit4, fit5)
 
@@ -262,8 +267,7 @@ summary(fit5)
 
 
 
-
-############################################################
+#------------------------
 #final model : fit4
 
 ideal<-lmer(ideal ~ 1 +livebirth +(1|agegp) + (1|edugp) +(1|county)+(1|prefecture)+ (1|prov),
@@ -277,10 +281,27 @@ intend<-lmer(intend ~ 1 +livebirth +(1|agegp) + (1|edugp) +(1|county)+(1|prefect
 summary(ideal,  digits=4)
 summary(intend,digits=4)
 
-
 bin_model<-tab_model( ideal,intend)
 
 print(bin_model)
+
+
+#alternative binary estimates 
+
+ideal2<-glmer(ideal2 ~ 1 +livebirth +(1|agegp) + (1|edugp) +(1|county)+(1|prefecture)+ (1|prov),
+            data = fer_ind,
+            family=binomial("probit"))
+
+
+intend2<-glmer(intend2 ~ 1 +livebirth +(1|agegp) + (1|edugp) +(1|county)+(1|prefecture)+ (1|prov),
+             data = fer_ind,
+             family=binomial("probit"))
+
+alt_model<-tab_model( ideal2,intend2)
+
+print(alt_model)
+
+
 
 # census_ind$est_ideal<-predict(ideal, newdata=census_ind,allow.new.levels = TRUE)
 # census_ind$est_intend<-predict(intend, newdata=census_ind,allow.new.levels = TRUE)
@@ -294,6 +315,9 @@ summary(census_ind$ideal_ci$fit)
 summary(census_ind$intend_ci$fit)
 summary(census_ind$intend_ci$upr)
 
+
+census_ind$ideal2<-predict(ideal2, newdata=census_ind,allow.new.levels = TRUE)
+census_ind$intend2<-predict(intend2, newdata=census_ind,allow.new.levels = TRUE)
 
 #----------------------
 #scatter plot of ideal type & confidence interval 
@@ -349,12 +373,15 @@ mrp_county<-census_ind%>%
   group_by(county)%>%
   summarise(ideal=weighted.mean(ideal_ci$fit, weight),
             intend=weighted.mean(intend_ci$fit, weight), 
-            idealgt=if_else(ideal>=intend,1,0),
+            ideal2=weighted.mean(pnorm(ideal2) , weight),
+            intend2=weighted.mean(pnorm(intend2) , weight),
             npop=sum(weight)) 
 
-table(mrp_county$idealgt)
 summary(mrp_county$ideal)
 summary(mrp_county$intend)
+
+summary(mrp_county$ideal2)
+summary(mrp_county$intend2)
 
 
 # > summary(mrp_county$ideal)
@@ -375,6 +402,7 @@ mrp_sub<-census_ind%>%
 summary(mrp_sub$ideal)
 summary(mrp_sub$intend)
 
+
 # > summary(mrp_sub$ideal)
 # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
 # 1.203   1.834   1.958   1.987   2.095   3.824 
@@ -383,86 +411,84 @@ summary(mrp_sub$intend)
 # 0.8824  1.5846  1.8282  1.8522  2.0852  4.0753 
 
 
-summaries_ideal <- mrp_sub %>%
-  group_by(agegp, edugp) %>%
-  summarize(
-    min = min(ideal),
-    q1 = quantile(ideal, 0.25),
-    median = median(ideal),
-    q3 = quantile(ideal, 0.75),
-    max = max(ideal),
-    ave=mean(ideal)
-  )
+save(mrp_county, file="mrp_county.RData")
+save(mrp_sub, file="mrp_sub.RData")
 
-summaries_intend <- mrp_sub %>%
-  group_by(agegp, edugp) %>%
-  summarize(
-    min = min(intend),
-    q1 = quantile(intend, 0.25),
-    median = median(intend),
-    q3 = quantile(intend, 0.75),
-    max = max(intend),
-    ave=mean(intend)
-  )
-view(summaries_intend)
 
+write.csv(mrp_county, file="mrp_county.csv")
+write.csv(mrp_sub, file="mrp_sub.csv")
+
+
+#-end of model fitting & post stratification 
+#------------------------------------------
+load("mrp_county.RData")
+load("mrp_sub.RData")
 
 # View the summaries
-mrp_sub_gather<-mrp_sub%>%
-  gather(ideal, intend, key = "attitude" , value ="value")
-
 table1(~ideal+intend |agegp, data= mrp_sub, decimal=2)
 
+#how many women of reproductive age are residing in below-replacement ideal counties ?
+ percentlow<-census_ind%>%
+   left_join(mrp_county, by ="county")%>%
+   dplyr::select(county, ideal, intend, npop)%>%
+   unique()%>%
+   mutate(lowideal=ifelse(ideal<2, 1,0))%>%
+   group_by(lowideal)%>%
+   summarise(lowidealpop=sum(npop))
 
-#by age and education subgroups 
+
+#density plot by age and education subgroups 
+age_colors <- c("lightgrey", "#a6d0c8", "#2c7c94")
+edu_colors <- c( "lightgrey","#fbe45b", "#a65852")
+
+
 
 ideal_agegp<-ggplot(data=mrp_sub)+
   stat_density(aes(ideal, color=agegp), geom="line", position="identity")+
-  scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
+  scale_color_manual(values=age_colors )+
   theme_bw()+
   theme(strip.background = element_rect(fill = "white"),
         legend.position = c(.8, .7),
         axis.title.x = element_text(size = 12))+
   scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0))+
   labs(color="Age")+
-  xlab("Ideal")
+  xlab("Ideal number of children")
 
 
 ideal_edugp<-ggplot(data=mrp_sub)+
   stat_density(aes(ideal, color=edugp), geom="line", position="identity")+
-    scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
+    scale_color_manual(values=edu_colors )+
   theme_bw()+
   theme(strip.background = element_rect(fill = "white"),
         legend.position = c(.8, .7),
         axis.title.x = element_text(size = 12))+
   scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0))+
   labs(color="Education") +
-  xlab("Ideal")
-
+  xlab("Ideal number of children")
 
 
 intend_agegp<-ggplot(data=mrp_sub)+
   stat_density(aes(intend, color=agegp), geom="line", position="identity")+
-  scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
+  scale_color_manual(values= age_colors )+
   theme_bw()+
   theme(strip.background = element_rect(fill = "white"),
         legend.position = c(.8, .7),
         axis.title.x = element_text(size = 12))+
   scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0))+
   labs(color="Age")+
-  xlab("Intend")
+  xlab("Intended number of children")
 
 
 intend_edugp<-ggplot(data=mrp_sub)+
   stat_density(aes(intend, color=edugp), geom="line", position="identity")+
-  scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
+  scale_color_manual(values= edu_colors)+
   theme_bw()+
   theme(strip.background = element_rect(fill = "white"),
         legend.position = c(.8, .7),
         axis.title.x = element_text(size = 12))+
   scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0)) +
   labs(color="Education")+
-  xlab("Intend")
+  xlab("Intended number of children")
 
 sub_combined <-cowplot:: plot_grid( ideal_edugp, ideal_agegp,  intend_edugp,intend_agegp,
                                     nrow=2)
@@ -471,97 +497,7 @@ sub_combined <-cowplot:: plot_grid( ideal_edugp, ideal_agegp,  intend_edugp,inte
 ggsave(filename = "sub_combined.png" , plot =sub_combined ) 
  
 
-
-
-# mrp_density<-ggplot(data = mrp_sub_gather )+
-#   geom_density(aes(value, color=attitude, linetype = attitude), size=0.8)+
-#   scale_linetype_manual(values=c("solid", "dashed"))+
-#   scale_color_manual(values= c("#a65852","black"))+
-#   facet_grid( agegp ~edugp)+
-#   theme_bw()+
-#   labs(x ="", fill="")+
-#   theme(strip.background = element_rect(fill = "white"),
-#         text = element_text(size = 13),
-#         legend.title = element_blank())+
-#   scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0)) 
-# 
-# print(mrp_density)  
-# 
-# ggsave(filename = "mrp_density.png" , plot =mrp_density ) 
-
-# #another version 
-# ideal_byage<-ggplot(data=mrp_sub)+
-#   geom_density(aes(ideal, color=edugp))+
-#   scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
-# #  scale_color_manual(values= c( "#000000","#848884" , "#D3D3D3"))+
-#   facet_wrap(~agegp)+
-#   theme_bw()+
-#   theme(strip.background = element_rect(fill = "white"))+
-#   scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0)) 
-# 
-# 
-# intend_byage<-ggplot(data=mrp_sub)+
-#   geom_density(aes(intend, color=edugp))+
-#   scale_color_manual(values= c("#610400","#ff8680" , "lightgrey"))+
-#   facet_wrap(~agegp)+
-#   theme_bw()+
-#   theme(strip.background = element_rect(fill = "white"))+
-#   scale_y_continuous(breaks = c(0,0.5, 1, 1.5,2.0, 2.5, 3.0)) 
-# 
-# 
-# byage<-cowplot:: plot_grid(ideal_byage,  intend_byage, nrow=2)
-# print(byage)
-# 
-# ggsave(filename = "byage.png" , plot =byage ) 
-# 
-# 
-# #----------------------
-# 
-# ideal_byedu<-ggplot(data=mrp_sub)+
-#   geom_density(aes(ideal, color=agegp))+
-#   scale_color_manual(values= c("#610400","#ff8680" , "#fee3e2"))+
-#   #  scale_color_manual(values= c( "#000000","#848884" , "#D3D3D3"))+
-#   facet_wrap(~edugp)+
-#   theme_bw()+
-#   theme(strip.background = element_rect(fill = "white"))
-# 
-# 
-# intend_byedu<-ggplot(data=mrp_sub)+
-#   geom_density(aes(intend, color=agegp))+
-#   scale_color_manual(values= c("#610400","#ff8680" , "#fee3e2"))+
-#   #  scale_color_manual(values= c("#000000","#848884" , "#D3D3D3"))+
-#   facet_wrap(~edugp)+
-#   theme_bw()+
-#   theme(strip.background = element_rect(fill = "white"))
-# 
-# 
-# byedu<-cowplot:: plot_grid(ideal_byedu,  intend_byedu, nrow=2)
-# print(byedu)
-# 
-# ggsave(filename = "byedu.png" , plot =byedu ) 
-
-
-# mrp_county_whole<-margin%>%
-#   group_by(county)%>%
-#   summarise(ideal=weighted.mean(est_ideal, weight),
-#             intend=weighted.mean(est_intend, weight), 
-#             npop=sum(weight)) 
-# 
-# summary(mrp_county_whole$ideal)
-# summary(mrp_county_whole$intend)
-# 
-# mr_sub_whole<-margin%>%
-#   group_by(county,agegp,edugp)%>%
-#   summarise(ideal=weighted.mean(est_ideal, weight),
-#             intend=weighted.mean(est_intend, weight), 
-#             npop=sum(weight)) 
-
-#save(mrp, file="mrp.RData")
-write.csv(mrp_county, file="mrp_county.csv")
-write.csv(mrp_sub, file="mrp_sub.csv")
-
 #maping 
-
 
 county_map<-st_read("C:/Users/Donghui/SynologyDrive/MRP/data_mrp/wholechina/export.shp")%>%
   dplyr::select(ename, gbcode,l700016_10,geometry)%>% #2872
@@ -573,6 +509,14 @@ length(unique(county_map$county)) #2872
 length(unique(mrp_county$county)) #2473
 
 merged<-merge(county_map , mrp_county, by.x="county" , by.y = "county" , all= FALSE ) 
+#!150221 土默特右旗 is somehow not merged 
+
+
+# mrpcounty<-merged%>%
+#   dplyr::select(-livebirth2010,-npop)
+# 
+# st_write(mrpcounty, "mrpcounty.shp")
+# 
 
 
 summary(merged$ideal)
@@ -600,15 +544,15 @@ mchina<-ggplot(data=prov)+
   theme(axis.title = element_blank(),
         axis.text = element_blank(),
         strip.background = element_blank())+
-  geom_sf(data=map_wholecounty, aes(fill=valid), alpha=0.2, color="transparent", fill="lightgrey")
+  geom_sf(data=map_wholecounty, aes(fill=valid), alpha=0.4, color="transparent", fill="lightgrey")
+  
   print(mchina)
 
   ggsave(filename = "mchina.png" , plot =mchina ) 
   
 
+  
 #graph result 
-
-table(map_wholecounty$value_dis)
 
 table(map_wholecounty$value_dis[map_wholecounty$measure == "ideal"])
 
@@ -618,33 +562,33 @@ table(map_wholecounty$value_dis[map_wholecounty$measure == "ideal"])
 
 table(map_wholecounty$value_dis[map_wholecounty$measure == "intend"])
 
-# [1.3, 1.5)    [1.5, 2)    [2, 2.5) [2.5, 3.8]  
-# 399        1186         751         136 
+#[1.0, 1.5)    [1.5, 2)    [2, 2.5) [2.5, 4.0]  
+# 402        1179         752         139  
 
 
-#top 10 countie with largest / smallest estimates 
-countyname <- read_excel("2020中国人口普查分县资料.xlsx",  sheet = "livebirth2020")
-
-ideal_top10_lowest<-mrp_county%>%
-  arrange(ideal)%>%
-  head(10)%>%
-  left_join(countyname, by="county")
-
-ideal_top10_highest<-mrp_county%>%
-  arrange(desc(ideal))%>%
-  head(10)%>%
-  left_join(countyname, by="county")
-
-
-intend_top10_lowest<-mrp_county%>%
-  arrange(intend)%>%
-  head(10)%>%
-  left_join(countyname, by="county")
-
-intend_top10_highest<-mrp_county%>%
-  arrange(desc(intend))%>%
-  head(10)%>%
-  left_join(countyname, by="county")
+# #top 10 countie with largest / smallest estimates 
+# countyname <- read_excel("2020中国人口普查分县资料.xlsx",  sheet = "livebirth2020")
+# 
+# ideal_top10_lowest<-mrp_county%>%
+#   arrange(ideal)%>%
+#   head(10)%>%
+#   left_join(countyname, by="county")
+# 
+# ideal_top10_highest<-mrp_county%>%
+#   arrange(desc(ideal))%>%
+#   head(10)%>%
+#   left_join(countyname, by="county")
+# 
+# 
+# intend_top10_lowest<-mrp_county%>%
+#   arrange(intend)%>%
+#   head(10)%>%
+#   left_join(countyname, by="county")
+# 
+# intend_top10_highest<-mrp_county%>%
+#   arrange(desc(intend))%>%
+#   head(10)%>%
+#   left_join(countyname, by="county")
 
 
 #----------------
@@ -670,20 +614,73 @@ print(mrp_graph)
 ggsave(filename = "mrp_graph.png" , plot =mrp_graph ) 
 
 
+#---------
+#single map 
+
+mrpgp_colors <- c("#2c7c94", "#a6d0c8", "#fbe45b", "#a65852" )
+
+ideal<-map_wholecounty%>%
+  filter(measure=="ideal")
+
+mrp_ideal<-ggplot(data = ideal) +
+  geom_sf(aes(fill=value_dis) , color="transparent")+
+  geom_sf(data=province_map,color = "#514e4c", fill = NA)+
+  scale_fill_manual(values = mrpgp_colors, drop= TRUE)+
+  theme_map()+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        strip.background = element_blank(),
+        legend.position = "bottom", legend.box = "horizontal",legend.justification = "center")+
+  labs(fill="")
+
+print(mrp_ideal)
+ggsave(filename = "mrp_ideal.png" , plot =mrp_ideal ) 
+
+
+
+
+intend<-map_wholecounty%>%
+  filter(measure=="intend")
+
+mrp_intend<-ggplot(data = intend) +
+  geom_sf(aes(fill=value_dis) , color="transparent")+
+  geom_sf(data=province_map,color = "#514e4c", fill = NA)+
+  scale_fill_manual(values = mrpgp_colors, drop= TRUE)+
+  theme_map()+
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        strip.background = element_blank(),
+        legend.position = "bottom", legend.box = "horizontal",legend.justification = "center")+
+  labs(fill="")
+
+print(mrp_intend)
+ggsave(filename = "mrp_intend.png" , plot =mrp_intend) 
+
+
+
+
 #--------------------------------
 #ideal to intend ratio 
 
 ratio<-merged%>%
   mutate(ratio=intend/ideal,
-         ratio_dis=cut(ratio, breaks = c(0.6, 0.8, 1, Inf),
-                                 labels = c("[60%, 80%)", "[80%, 100%)", "[100%, 133%)"), 
-                                 include.lowest = FALSE))
+         ratio_dis=cut(ratio, breaks = c(0.6, 0.8, 1.00001, Inf),
+                        labels = c("[60%, 80%)", "[80%, 100%)", "[100%, 133%)"), 
+                        include.lowest = FALSE))
+        #ratio_dis=cut(ratio, breaks = c(0.6, 0.7,0.8, 0.9, 1.0, 1.1, 1.2, 1.4),
+                      #labels=c("[60%,70%)", "[70%,80%)", "[80%,90%)", "[90%,100%)",
+                      #         "[100%,110%)", "[110%,120%)", "[120%,133%)")
+                     # ,include.lowest = FALSE))
+                               
 summary(ratio$ratio)
-table(ratio$ratio_dis)
-
+table(ratio$ratio_dis, useNA = "always")
 
 #ratio_colors <- c("#DFDFEA" , "#8D9FD1" , "#D18CB8" )
-ratio_colors <- c("#DFDFEA" , "#8D9FD1" , "#9F1F31" )
+#ratio_colors <- c("#e0ecf4" , "#9ebcda" , "#8856a7" )
+
+ratio_colors <- c("#f2f0f7","#dadaeb", "#bcbddc", "#9e9ac8" ,
+                  "#d9f0d3" , "#7fbf7b" , "#1b7837" )
+
 
 ratio_graph<-ggplot(data = ratio) +
   geom_sf(aes(fill=ratio_dis) , color="transparent")+
@@ -698,6 +695,9 @@ ratio_graph<-ggplot(data = ratio) +
     labs(title = "(Intended/Ideal)\u00D7100%",fill="")
   
 print(ratio_graph) 
+
+#ggsave(filename = "raio_graphv2.png" , plot =ratio_graph ) 
+
 
 raio_combined <-cowplot:: plot_grid( mrp_graph, ratio_graph, 
                                     nrow=2)
